@@ -267,13 +267,13 @@ class SanityChecker:
         failed_tests = total_tests - passed_tests
         
         print("\n" + "=" * 50)
-        print(f"📊 Test Summary: {passed_tests}/{total_tests} tests passed")
+        print(f"Test Summary: {passed_tests}/{total_tests} tests passed")
         
         if failed_tests > 0:
-            print(f"❌ {failed_tests} tests failed")
+            print(f"{failed_tests} tests failed")
             return {"success": False, "passed": passed_tests, "total": total_tests}
         else:
-            print("✅ All tests passed!")
+            print("All tests passed!")
             return {"success": True, "passed": passed_tests, "total": total_tests}
 
 async def main():

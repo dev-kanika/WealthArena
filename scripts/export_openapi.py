@@ -29,17 +29,17 @@ def export_openapi_spec(
         health_response = requests.get(f"{server_url}/healthz", timeout=5)
         
         if health_response.status_code != 200:
-            print(f"❌ Server health check failed: {health_response.status_code}")
+            print(f"Server health check failed: {health_response.status_code}")
             return False
             
-        print("✅ Server is running and healthy")
+        print("Server is running and healthy")
         
         # Fetch OpenAPI specification
         print(f"Fetching OpenAPI specification from {server_url}/openapi.json...")
         openapi_response = requests.get(f"{server_url}/openapi.json", timeout=10)
         
         if openapi_response.status_code != 200:
-            print(f"❌ Failed to fetch OpenAPI spec: {openapi_response.status_code}")
+            print(f"Failed to fetch OpenAPI spec: {openapi_response.status_code}")
             print(f"Response: {openapi_response.text}")
             return False
             
@@ -47,7 +47,7 @@ def export_openapi_spec(
         try:
             openapi_data = openapi_response.json()
         except json.JSONDecodeError as e:
-            print(f"❌ Invalid JSON response: {e}")
+            print(f"Invalid JSON response: {e}")
             return False
             
         # Create output directory if it doesn't exist
@@ -59,11 +59,11 @@ def export_openapi_spec(
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(openapi_data, f, indent=2, ensure_ascii=False)
             
-        print(f"✅ OpenAPI specification exported successfully to {output_file}")
+        print(f"OpenAPI specification exported successfully to {output_file}")
         
         # Print summary
         info = openapi_data.get('info', {})
-        print(f"\n📋 OpenAPI Summary:")
+        print(f"\nOpenAPI Summary:")
         print(f"  Title: {info.get('title', 'N/A')}")
         print(f"  Version: {info.get('version', 'N/A')}")
         print(f"  Description: {info.get('description', 'N/A')[:100]}...")
@@ -77,7 +77,7 @@ def export_openapi_spec(
             '/v1/explain', '/v1/game/episodes', '/v1/game/create'
         ]
         
-        print(f"\n🔗 Key Endpoints:")
+        print(f"\nKey Endpoints:")
         for endpoint in key_endpoints:
             if endpoint in paths:
                 methods = list(paths[endpoint].keys())
@@ -88,21 +88,21 @@ def export_openapi_spec(
         return True
         
     except requests.exceptions.ConnectionError:
-        print(f"❌ Could not connect to server at {server_url}")
+        print(f"Could not connect to server at {server_url}")
         print("Make sure the server is running with: uvicorn app.main:app --reload")
         return False
         
     except requests.exceptions.Timeout:
-        print(f"❌ Request timed out. Server might be slow or unresponsive.")
+        print(f"Request timed out. Server might be slow or unresponsive.")
         return False
         
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"Unexpected error: {e}")
         return False
 
 def main():
     """Main function to export OpenAPI specification"""
-    print("🚀 WealthArena OpenAPI Export Tool")
+    print("WealthArena OpenAPI Export Tool")
     print("=" * 50)
     
     # Default configuration
@@ -125,15 +125,15 @@ def main():
     success = export_openapi_spec(server_url, output_file)
     
     if success:
-        print("\n🎉 OpenAPI export completed successfully!")
-        print(f"📄 Documentation saved to: {output_file}")
-        print("\n💡 Next steps:")
+        print("\nOpenAPI export completed successfully!")
+        print(f"Documentation saved to: {output_file}")
+        print("\nNext steps:")
         print("  - Use the OpenAPI file with tools like Swagger UI")
         print("  - Generate client SDKs from the specification")
         print("  - Share API documentation with your team")
     else:
-        print("\n❌ OpenAPI export failed!")
-        print("\n🔧 Troubleshooting:")
+        print("\nOpenAPI export failed!")
+        print("\nTroubleshooting:")
         print("  1. Make sure the server is running: uvicorn app.main:app --reload")
         print("  2. Check that the server is accessible at http://127.0.0.1:8000")
         print("  3. Verify the server is healthy: curl http://127.0.0.1:8000/healthz")

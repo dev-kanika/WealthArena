@@ -8,7 +8,15 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
-import pandas as pd
+from ..tools.prices import PriceTool
+
+# Lazy import pandas
+try:
+    import pandas as pd
+    _PANDAS_AVAILABLE = True
+except ImportError:
+    pd = None
+    _PANDAS_AVAILABLE = False
 
 router = APIRouter()
 
@@ -68,7 +76,7 @@ async def get_ohlc_data(
                 h=float(row['High']),
                 l=float(row['Low']),
                 c=float(row['Close']),
-                v=int(row['Volume']) if not pd.isna(row['Volume']) else 0
+                v=int(row['Volume']) if (_PANDAS_AVAILABLE and pd is not None and not pd.isna(row['Volume'])) else 0
             )
             candles.append(candle)
         
@@ -130,3 +138,8 @@ async def get_quote(
             status_code=500,
             detail=f"Error fetching quote data: {str(e)}"
         )
+
+@router.get("/market/trends")
+def market_trends():
+    """Get market trends with offline fallback"""
+    return PriceTool().get_trends()

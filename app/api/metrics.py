@@ -3,47 +3,44 @@ WealthArena Metrics API
 Endpoints for system metrics and monitoring
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Response, HTTPException
 from typing import Dict, Any
 import logging
-
-from ..tools.news_ingest import rss_metrics
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+api_router = APIRouter()
 
-@router.get("/rss", response_model=Dict[str, Any])
-async def get_rss_metrics():
-    """
-    Get RSS feed ingestion metrics
-    
-    Returns comprehensive metrics about RSS feed fetching including:
-    - Success percentage
-    - Error rates
-    - Throughput (pages per minute)
-    - Response times
-    - Per-feed statistics
-    """
-    try:
-        metrics = rss_metrics()
-        return metrics
-    except Exception as e:
-        logger.error(f"Error retrieving RSS metrics: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve RSS metrics: {str(e)}"
-        )
+# Try Prometheus integration if available
+try:
+    from app.metrics.prom import get_metrics_response  # type: ignore
+    _HAS_PROM = True
+except Exception:
+    _HAS_PROM = False
+    get_metrics_response = None  # type: ignore
 
-@router.get("/system")
+@router.get("/metrics")
+def metrics():
+    """
+    Prometheus metrics endpoint with fallback
+    """
+    if _HAS_PROM and callable(get_metrics_response):
+        # Return Prometheus-formatted metrics
+        return get_metrics_response()
+    # JSON fallback keeps the app bootable without prom client
+    return {"status": "ok", "metrics": "fallback", "note": "Prometheus client not available"}
+
+# JSON endpoint: GET /v1/metrics/system
+@api_router.get("/system")
 async def get_system_metrics():
     """
-    Get system-wide metrics (placeholder for future expansion)
+    Get system-wide metrics
     """
     return {
-        "message": "System metrics endpoint - to be implemented",
+        "message": "System metrics endpoint",
         "available_metrics": [
-            "/metrics/rss - RSS feed ingestion metrics"
+            "/metrics - Prometheus metrics"
         ]
     }
 

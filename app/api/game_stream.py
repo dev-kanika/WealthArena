@@ -10,7 +10,14 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
 import yfinance as yf
-import pandas as pd
+
+# Lazy import pandas
+try:
+    import pandas as pd
+    _PANDAS_AVAILABLE = True
+except ImportError:
+    pd = None
+    _PANDAS_AVAILABLE = False
 
 from .game import game_states, historical_data_cache, _load_historical_data, _get_price_for_date, _save_game_state, DIFFICULTY_LEVELS
 

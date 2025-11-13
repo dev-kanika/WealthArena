@@ -3,9 +3,56 @@ Prometheus Metrics for WealthArena
 Defines and exports Prometheus metrics for monitoring
 """
 
-from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
-from fastapi import Response
 from typing import Dict, Any
+
+# Try to import Prometheus and FastAPI dependencies with fallbacks
+try:
+    from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+    _HAS_PROMETHEUS = True
+except ImportError:
+    _HAS_PROMETHEUS = False
+    # Create no-op classes for when prometheus_client is not available
+    class Counter:
+        def __init__(self, *args, **kwargs):
+            pass
+        def labels(self, **kwargs):
+            return self
+        def inc(self, value=1):
+            pass
+    
+    class Histogram:
+        def __init__(self, *args, **kwargs):
+            pass
+        def labels(self, **kwargs):
+            return self
+        def observe(self, value):
+            pass
+    
+    class Gauge:
+        def __init__(self, *args, **kwargs):
+            pass
+        def labels(self, **kwargs):
+            return self
+        def set(self, value):
+            pass
+        def inc(self, value=1):
+            pass
+    
+    def generate_latest():
+        return b""
+    
+    CONTENT_TYPE_LATEST = "text/plain"
+
+try:
+    from fastapi import Response
+    _HAS_FASTAPI = True
+except ImportError:
+    _HAS_FASTAPI = False
+    # Create a simple Response class for when FastAPI is not available
+    class Response:
+        def __init__(self, content, media_type="text/plain"):
+            self.content = content
+            self.media_type = media_type
 
 # Chat metrics
 CHAT_REQ_TOTAL = Counter(
@@ -63,6 +110,57 @@ EXPLAIN_LATENCY = Histogram(
     "explain_latency_seconds",
     "Explain request latency in seconds",
     buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+)
+
+# Scraping metrics (DEPRECATED - scraping removed, kept for backward compatibility)
+SCRAPE_REQUESTS_TOTAL = Counter(
+    "scrape_requests_total",
+    "Total number of scraping requests (deprecated)",
+    ["source_type", "status"]  # source_type: rss/sec, status: success/error
+)
+
+SCRAPE_LATENCY = Histogram(
+    "scrape_latency_seconds",
+    "Scraping operation latency in seconds (deprecated)",
+    buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0]
+)
+
+SCRAPE_DOCUMENTS_TOTAL = Counter(
+    "scrape_documents_total",
+    "Total number of documents fetched (deprecated)",
+    ["source_type"]  # source_type: rss/sec
+)
+
+# Ingestion metrics
+INGEST_DOCUMENTS_TOTAL = Counter(
+    "ingest_documents_total",
+    "Total number of documents ingested",
+    ["collection", "status"]  # collection: news_articles/educational_content/forex_events/community_posts, status: added/duplicate/error
+)
+
+INGEST_LATENCY = Histogram(
+    "ingest_latency_seconds",
+    "Ingestion operation latency in seconds",
+    buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0]
+)
+
+VECTOR_STORE_DOCUMENTS = Gauge(
+    "vector_store_documents",
+    "Total number of documents in vector store",
+    ["collection"]  # collection: wealtharena_kb/news_articles/educational_content/forex_events/community_posts
+)
+
+# Background job metrics
+BACKGROUND_JOB_RUNS_TOTAL = Counter(
+    "background_job_runs_total",
+    "Total number of background job runs",
+    ["job_name", "status"]  # job_name: news_ingestion/sec_ingestion, status: success/error
+)
+
+BACKGROUND_JOB_LAST_SUCCESS = Gauge(
+    "background_job_last_success_timestamp",
+    "Timestamp of last successful background job run",
+    ["job_name"]  # job_name: news_ingestion/sec_ingestion
 )
 
 def get_metrics_response() -> Response:
@@ -137,6 +235,62 @@ def set_active_games(count: int):
     """
     ACTIVE_GAMES.set(count)
 
+def record_scrape_request(source_type: str, status: str, latency: float, doc_count: int = 0):
+    """
+    Record a scraping request metric (DEPRECATED - scraping removed)
+    
+    Args:
+        source_type: Source type (rss/sec)
+        status: Request status (success/error)
+        latency: Request latency in seconds
+        doc_count: Number of documents fetched
+    """
+    SCRAPE_REQUESTS_TOTAL.labels(source_type=source_type, status=status).inc()
+    SCRAPE_LATENCY.observe(latency)
+    if doc_count > 0:
+        SCRAPE_DOCUMENTS_TOTAL.labels(source_type=source_type).inc(doc_count)
+
+def record_ingest_operation(collection: str, status: str, latency: float, doc_count: int = 0):
+    """
+    Record an ingestion operation metric
+    
+    Args:
+        collection: Collection name (news_articles/educational_content/forex_events/community_posts)
+        status: Operation status (added/duplicate/error)
+        latency: Operation latency in seconds
+        doc_count: Number of documents processed
+    """
+    if not _HAS_PROMETHEUS:
+        return  # No-op when prometheus_client is not available
+    INGEST_DOCUMENTS_TOTAL.labels(collection=collection, status=status).inc(doc_count)
+    INGEST_LATENCY.observe(latency)
+
+def record_background_job(job_name: str, status: str, duration: float):
+    """
+    Record a background job execution metric
+    
+    Args:
+        job_name: Job name (news_ingestion/sec_ingestion)
+        status: Job status (success/error)
+        duration: Job duration in seconds
+    """
+    BACKGROUND_JOB_RUNS_TOTAL.labels(job_name=job_name, status=status).inc()
+    if status == "success":
+        import time
+        BACKGROUND_JOB_LAST_SUCCESS.labels(job_name=job_name).set(time.time())
+
+def update_vector_store_size(collection: str, count: int):
+    """
+    Update vector store document count gauge
+    
+    Args:
+        collection: Collection name
+        count: Document count
+    """
+    if not _HAS_PROMETHEUS:
+        return  # No-op when prometheus_client is not available
+    VECTOR_STORE_DOCUMENTS.labels(collection=collection).set(count)
+
 def get_metrics_summary() -> Dict[str, Any]:
     """
     Get a summary of current metrics (for debugging/monitoring)
@@ -154,7 +308,15 @@ def get_metrics_summary() -> Dict[str, Any]:
             "active_games_total",
             "search_requests_total",
             "explain_requests_total",
-            "explain_latency_seconds"
+            "explain_latency_seconds",
+            "scrape_requests_total",
+            "scrape_latency_seconds",
+            "scrape_documents_total",
+            "ingest_documents_total",
+            "ingest_latency_seconds",
+            "vector_store_documents",
+            "background_job_runs_total",
+            "background_job_last_success_timestamp"
         ],
         "description": "Prometheus metrics for WealthArena API monitoring"
     }

@@ -10,17 +10,18 @@ import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Try to import Chroma for vector search
 try:
     import chromadb
     from chromadb.config import Settings
+    from chromadb.utils import embedding_functions
     CHROMA_AVAILABLE = True
 except ImportError:
     CHROMA_AVAILABLE = False
+    embedding_functions = None
 
-from ..tools.news_ingest import get_news_ingest
 from ..metrics.prom import record_search_request
 
 router = APIRouter()
@@ -29,25 +30,27 @@ class SearchResult(BaseModel):
     """Search result model"""
     id: str
     score: float
+    text: str  # PDF chunk text content
     title: str
     url: str
     source: str
     ts: str
-    tickers: List[str] = []
-    event_tags: List[str] = []
+    metadata: Dict[str, Any] = Field(default_factory=dict)  # Include full metadata with filename, page_number, collection_type
+    tickers: List[str] = Field(default_factory=list)
+    event_tags: List[str] = Field(default_factory=list)
 
 class SearchResponse(BaseModel):
     """Search response model"""
     query: str
     results: List[SearchResult]
+    count: int  # Number of results returned
 
 class SearchService:
-    """Search service with Chroma fallback to in-memory search"""
+    """Search service using Chroma vector database for PDF documents"""
     
     def __init__(self):
         self.chroma_client = None
         self.chroma_collection = None
-        self.news_ingest = get_news_ingest()
         self._setup_chroma()
     
     def _setup_chroma(self):
@@ -56,19 +59,21 @@ class SearchService:
             return
         
         try:
-            # Initialize Chroma client
-            self.chroma_client = chromadb.Client(Settings(
-                persist_directory="./data/chroma_db",
-                anonymized_telemetry=False
-            ))
+            # Use shared path helper for consistent path resolution
+            from ..utils.paths import get_vectorstore_path
+            db_dir = get_vectorstore_path()
             
-            # Get or create collection
+            # Initialize Chroma client
+            self.chroma_client = chromadb.PersistentClient(path=db_dir)
+            
+            # Get or create PDF documents collection
             self.chroma_collection = self.chroma_client.get_or_create_collection(
-                name="news_articles",
+                name="pdf_documents",
+                embedding_function=embedding_functions.DefaultEmbeddingFunction(),
                 metadata={"hnsw:space": "cosine"}
             )
             
-            print("Chroma client initialized successfully")
+            print(f"Chroma client initialized successfully at {db_dir}")
         except Exception as e:
             print(f"Failed to initialize Chroma: {e}")
             self.chroma_client = None
@@ -76,7 +81,7 @@ class SearchService:
     
     async def search(self, query: str, k: int = 5) -> SearchResponse:
         """
-        Search for articles using Chroma or fallback to in-memory search
+        Search for PDF documents using Chroma vector database
         
         Args:
             query: Search query
@@ -84,6 +89,9 @@ class SearchService:
             
         Returns:
             SearchResponse with results
+            
+        Raises:
+            HTTPException: 503 if vector store is unavailable
         """
         start_time = time.time()
         if self.chroma_collection is not None:
@@ -92,10 +100,13 @@ class SearchService:
             record_search_request("vector", latency)
             return result
         else:
-            result = await self._in_memory_search(query, k)
+            # Return 503 Service Unavailable if Chroma not available
             latency = time.time() - start_time
-            record_search_request("fallback", latency)
-            return result
+            record_search_request("error", latency)
+            raise HTTPException(
+                status_code=503,
+                detail="Vector store is currently unavailable. The search service cannot process requests at this time."
+            )
     
     async def _chroma_search(self, query: str, k: int) -> SearchResponse:
         """Search using Chroma vector database"""
@@ -116,75 +127,40 @@ class SearchService:
                     # Convert distance to similarity score (1 - distance for cosine)
                     score = 1.0 - distance if distance <= 1.0 else 0.0
                     
+                    # Get document ID from results
+                    doc_id = f'chroma_{i}'
+                    if results.get('ids') and results['ids'][0] and i < len(results['ids'][0]):
+                        doc_id = results['ids'][0][i]
+                    elif metadata.get('id'):
+                        doc_id = metadata.get('id')
+                    
+                    # Build metadata dict with required fields
+                    result_metadata = {
+                        'filename': metadata.get('filename', metadata.get('title', 'PDF Document')),
+                        'page_number': metadata.get('page_number', None),
+                        'collection_type': metadata.get('collection_type', 'pdf_documents'),
+                        'file_path': metadata.get('file_path', ''),
+                        'id': doc_id
+                    }
+                    
                     search_results.append(SearchResult(
-                        id=metadata.get('id', f'chroma_{i}'),
+                        id=doc_id,
                         score=score,
-                        title=metadata.get('title', 'No Title'),
-                        url=metadata.get('url', ''),
-                        source=metadata.get('source', 'Unknown'),
-                        ts=metadata.get('published_date', datetime.now().isoformat()),
+                        text=doc,  # Include the actual PDF chunk text
+                        title=metadata.get('filename', metadata.get('title', 'PDF Document')),
+                        url=metadata.get('file_path', ''),
+                        source=metadata.get('filename', 'PDF Document'),
+                        ts=metadata.get('modified_time', metadata.get('processed_at', datetime.now().isoformat())),
+                        metadata=result_metadata,
                         tickers=self._extract_tickers(metadata.get('tickers', [])),
-                        event_tags=self._extract_event_tags(metadata.get('event_tags', []))
+                        event_tags=[]
                     ))
             
-            return SearchResponse(query=query, results=search_results)
+            return SearchResponse(query=query, results=search_results, count=len(search_results))
             
         except Exception as e:
             print(f"Chroma search failed: {e}")
-            # Fallback to in-memory search
-            return await self._in_memory_search(query, k)
-    
-    async def _in_memory_search(self, query: str, k: int) -> SearchResponse:
-        """Fallback in-memory search over latest news items"""
-        try:
-            # Fetch latest news articles
-            articles = await self.news_ingest.fetch_rss(limit_per_feed=5)
-            
-            if not articles:
-                return SearchResponse(query=query, results=[])
-            
-            # Simple TF-based scoring
-            query_terms = self._tokenize(query.lower())
-            scored_articles = []
-            
-            for article in articles:
-                # Combine title and summary for search
-                text_content = f"{article.get('title', '')} {article.get('summary', '')}"
-                text_terms = self._tokenize(text_content.lower())
-                
-                # Calculate simple TF score
-                score = self._calculate_tf_score(query_terms, text_terms)
-                
-                if score > 0:
-                    scored_articles.append({
-                        'article': article,
-                        'score': score
-                    })
-            
-            # Sort by score and take top k
-            scored_articles.sort(key=lambda x: x['score'], reverse=True)
-            top_articles = scored_articles[:k]
-            
-            # Convert to SearchResult format
-            search_results = []
-            for item in top_articles:
-                article = item['article']
-                search_results.append(SearchResult(
-                    id=article.get('guid', article.get('link', f'in_memory_{len(search_results)}')),
-                    score=item['score'],
-                    title=article.get('title', 'No Title'),
-                    url=article.get('link', ''),
-                    source=article.get('source_name', 'Unknown'),
-                    ts=article.get('published_date', article.get('fetched_at', datetime.now().isoformat())),
-                    tickers=self._extract_tickers_from_text(article.get('title', '') + ' ' + article.get('summary', '')),
-                    event_tags=self._extract_event_tags_from_text(article.get('title', '') + ' ' + article.get('summary', ''))
-                ))
-            
-            return SearchResponse(query=query, results=search_results)
-            
-        except Exception as e:
-            print(f"In-memory search failed: {e}")
-            return SearchResponse(query=query, results=[])
+            return SearchResponse(query=query, results=[], count=0)
     
     def _tokenize(self, text: str) -> List[str]:
         """Simple tokenization"""
@@ -277,19 +253,19 @@ def get_search_service() -> SearchService:
     return _search_service
 
 @router.get("/search", response_model=SearchResponse)
-async def search_articles(
+async def search_documents(
     q: str = Query(..., description="Search query"),
     k: int = Query(5, description="Number of results to return", ge=1, le=20)
 ):
     """
-    Search for financial news articles
+    Search for PDF documents in the knowledge base
     
     Args:
         q: Search query string
         k: Number of results to return (1-20)
         
     Returns:
-        SearchResponse with matching articles
+        SearchResponse with matching PDF document chunks
     """
     if not q.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")

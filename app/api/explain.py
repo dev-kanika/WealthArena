@@ -3,14 +3,33 @@ Explain API endpoint
 Provides explanation functionality using search and Groq LLM
 """
 
+import os
 import time
+import logging
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..api.search import get_search_service
 from ..llm.client import LLMClient
 from ..metrics.prom import record_explain_request
+from ..tools.retrieval import search_kb, search_all_collections
+
+# Lazy load guard prompt
+_guard_prompt = None
+
+def _get_guard_prompt() -> str:
+    """Lazy load guard prompt with graceful fallback"""
+    global _guard_prompt
+    if _guard_prompt is None:
+        try:
+            guard_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "llm", "guard_prompt.txt")
+            with open(guard_path, "r", encoding="utf-8") as f:
+                _guard_prompt = f.read()
+        except Exception as e:
+            # Fallback to default guard prompt if file not found
+            logging.warning(f"Could not load guard prompt from file: {e}. Using default.")
+            _guard_prompt = "You are WealthArena Tutor. Be concise (2–3 sentences). Educational only; no financial advice."
+    return _guard_prompt
 
 router = APIRouter()
 
@@ -35,11 +54,10 @@ class ExplainService:
     
     def __init__(self):
         self.llm_client = LLMClient()
-        self.search_service = get_search_service()
     
     async def explain(self, question: str, k: int = 3) -> ExplainResponse:
         """
-        Explain a question using search results and LLM
+        Explain a question using KB search and LLM
         
         Args:
             question: Question to explain
@@ -50,56 +68,40 @@ class ExplainService:
         """
         start_time = time.time()
         try:
-            # Search for relevant documents
-            search_response = await self.search_service.search(question, k)
+            # Search PDF documents collection for relevant documents
+            kb_hits = await search_all_collections(question, k=k, collections=['pdf_documents'])
             
-            if not search_response.results:
-                return ExplainResponse(
-                    answer="I couldn't find relevant information to answer your question. Please try rephrasing your question or ask about a different topic.",
-                    sources=[]
-                )
-            
-            # Build context from search results
+            # Format context with source attribution
             context_parts = []
-            sources = []
+            for hit in kb_hits:
+                meta = hit.get("meta", {})
+                filename = meta.get("filename", "PDF Document")
+                source_label = f"PDF: {filename}"
+                context_parts.append(f'[{source_label}]\n{hit["text"]}\n')
+            context = "\n\n".join(context_parts) or "No context."
             
-            for result in search_response.results:
-                context_parts.append(f"Title: {result.title}")
-                context_parts.append(f"Summary: {result.summary if hasattr(result, 'summary') else 'No summary available'}")
-                context_parts.append(f"URL: {result.url}")
-                context_parts.append("---")
-                
+            # Build sources from hits with collection type
+            sources = []
+            for hit in kb_hits:
+                meta = hit.get("meta", {})
+                collection_type = meta.get("collection_type", "unknown")
+                title = meta.get("title") or meta.get("path") or f"{collection_type} Document"
                 sources.append(SourceInfo(
-                    title=result.title,
-                    url=result.url,
-                    score=result.score
+                    title=title,
+                    url=meta.get("url", ""),
+                    score=hit.get("score", 0)
                 ))
             
-            context = "\n".join(context_parts)
-            
-            # Create system prompt
-            system_prompt = """You are a financial education assistant. Answer the user's question using ONLY the provided context from financial news articles. 
-
-Rules:
-1. Answer only using the provided context
-2. If the context is insufficient to answer the question, say what information is missing
-3. Keep your answer to 2-3 sentences maximum
-4. Focus on educational content about trading and finance
-5. Always remind users that this is educational content and they should practice with paper trading first
-6. Never provide specific investment advice
-
-Context:
-{context}"""
-            
-            # Prepare messages for LLM
+            # Prepare messages for LLM with guard prompt
+            guard_prompt = _get_guard_prompt()
             messages = [
                 {
                     "role": "system",
-                    "content": system_prompt.format(context=context)
+                    "content": guard_prompt
                 },
                 {
                     "role": "user", 
-                    "content": question
+                    "content": f"QUESTION: {question}\n\nCONTEXT:\n{context}"
                 }
             ]
             
@@ -120,9 +122,15 @@ Context:
             latency = time.time() - start_time
             record_explain_request("error", latency)
             
-            print(f"Explain service error: {e}")
+            logging.error(f"Explain service error: {e}")
+            error_message = str(e)
+            if "GROQ_API_KEY" in error_message or "API key" in error_message.lower():
+                answer = "Unable to generate explanation. Please ensure GROQ_API_KEY is configured correctly in your .env file. Get your key from https://console.groq.com/"
+            else:
+                answer = f"Unable to generate explanation. LLM service unavailable: {error_message}. Please check your configuration and try again."
+            
             return ExplainResponse(
-                answer="I'm having trouble processing your question right now. Please try again later.",
+                answer=answer,
                 sources=[]
             )
 

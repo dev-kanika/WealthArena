@@ -3,25 +3,65 @@ WealthArena Price Tools
 Tools for price data and analysis
 """
 
-import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import yfinance as yf
+
+# Try to import pandas for data handling
+try:
+    import pandas as pd
+    _PANDAS_AVAILABLE = True
+except ImportError:
+    pd = None
+    _PANDAS_AVAILABLE = False
 
 class PriceTool:
     """Tool for price data and analysis"""
     
     def __init__(self):
-        self.base_prices = {
-            "AAPL": 150.0,
-            "TSLA": 200.0,
-            "BTC-USD": 45000.0,
-            "ETH-USD": 3000.0
-        }
+        pass
     
     def get_current_price(self, symbol: str) -> float:
-        """Get current price for a symbol"""
-        return self.base_prices.get(symbol.upper(), 100.0)
+        """Get current price for a symbol using real market data"""
+        try:
+            price_data = self.get_price(symbol)
+            if price_data["price"] is not None:
+                return price_data["price"]
+            else:
+                raise ValueError(f"Price data unavailable for {symbol}")
+        except Exception as e:
+            raise ValueError(f"Unable to get current price for {symbol}: {str(e)}")
+    
+    def get_trends(self) -> dict:
+        """Get market trends using real market data"""
+        try:
+            # Get real market data for popular symbols
+            symbols = ["SPY", "AAPL"]
+            items = []
+            
+            for symbol in symbols:
+                try:
+                    ticker_obj = yf.Ticker(symbol)
+                    hist = ticker_obj.history(period="5d")
+                    
+                    if not hist.empty:
+                        # Get closing prices for sparkline
+                        spark = [round(float(price), 2) for price in hist['Close'].tolist()]
+                        items.append({
+                            "symbol": symbol,
+                            "spark": spark
+                        })
+                except Exception as e:
+                    # Skip symbols that fail, but continue with others
+                    continue
+            
+            if not items:
+                raise ValueError("No market trend data available")
+            
+            return {"mode": "live", "items": items}
+            
+        except Exception as e:
+            raise ValueError(f"Unable to fetch market trends: {str(e)}. Please check your network connection and ensure market data services are available.")
     
     def get_price(self, ticker: str) -> Dict:
         """Get real-time price data for a ticker using yfinance"""
@@ -61,37 +101,46 @@ class PriceTool:
             }
     
     def generate_ohlcv(self, symbol: str, days: int = 30) -> List[Dict]:
-        """Generate mock OHLCV data for a symbol"""
-        base_price = self.base_prices.get(symbol.upper(), 100.0)
-        data = []
-        
-        for i in range(days):
-            date = datetime.now() - timedelta(days=days-i)
+        """Generate OHLCV data for a symbol using real market data from yfinance"""
+        try:
+            ticker_obj = yf.Ticker(symbol.upper())
             
-            # Generate realistic price movement
-            volatility = 0.02 if "USD" in symbol else 0.01  # Crypto more volatile
-            change = random.uniform(-volatility, volatility)
-            price = base_price * (1 + change)
-            base_price = price
+            # Calculate period based on days
+            if days <= 5:
+                period = "5d"
+            elif days <= 30:
+                period = "1mo"
+            elif days <= 90:
+                period = "3mo"
+            elif days <= 180:
+                period = "6mo"
+            elif days <= 365:
+                period = "1y"
+            else:
+                period = "2y"
             
-            # Generate OHLC from base price
-            high = price * random.uniform(1.001, 1.02)
-            low = price * random.uniform(0.98, 0.999)
-            open_price = price * random.uniform(0.995, 1.005)
-            close = price
+            # Get historical data
+            hist = ticker_obj.history(period=period)
             
-            volume = random.randint(1000000, 10000000)
+            if hist.empty:
+                raise ValueError(f"No historical data available for symbol {symbol}")
             
-            data.append({
-                "date": date.strftime("%Y-%m-%d"),
-                "open": round(open_price, 2),
-                "high": round(high, 2),
-                "low": round(low, 2),
-                "close": round(close, 2),
-                "volume": volume
-            })
-        
-        return data
+            # Convert to OHLCV format and limit to requested days
+            data = []
+            for timestamp, row in hist.tail(days).iterrows():
+                data.append({
+                    "date": timestamp.strftime("%Y-%m-%d"),
+                    "open": round(float(row['Open']), 2),
+                    "high": round(float(row['High']), 2),
+                    "low": round(float(row['Low']), 2),
+                    "close": round(float(row['Close']), 2),
+                    "volume": int(row['Volume']) if (_PANDAS_AVAILABLE and pd is not None and not pd.isna(row['Volume'])) else int(row['Volume']) if row['Volume'] else 0
+                })
+            
+            return data
+            
+        except Exception as e:
+            raise ValueError(f"Unable to fetch OHLCV data for {symbol}: {str(e)}. Please check the symbol and ensure market data is available.")
     
     def calculate_sma(self, prices: List[float], period: int) -> List[Optional[float]]:
         """Calculate Simple Moving Average"""
@@ -154,10 +203,7 @@ class PriceTool:
     
     def analyze_symbol(self, symbol: str) -> Dict:
         """Analyze a symbol with technical indicators"""
-        if symbol.upper() not in self.base_prices:
-            raise ValueError(f"Symbol {symbol} not supported")
-        
-        # Generate mock data
+        # Generate OHLCV data - generate_ohlcv will raise ValueError if symbol is invalid or has no data
         ohlcv_data = self.generate_ohlcv(symbol, 30)
         closes = [candle["close"] for candle in ohlcv_data]
         

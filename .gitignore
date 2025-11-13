@@ -30,20 +30,13 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Unit test / coverage reports
-htmlcov/
+# Unit test reports
 .tox/
 .nox/
-.coverage
-.coverage.*
 .cache
 nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
 .hypothesis/
 .pytest_cache/
-cover/
 
 # Translations
 *.mo
@@ -169,3 +162,30 @@ Thumbs.db
 
 # Docker
 .dockerignore
+
+# Deployment artifacts
+app-logs/
+deploy_output.txt
+deploy.zip
+*.log
+
+# Azure deployment files
+.azure/
+
+# Metrics snapshots (should be generated, not committed)
+metrics/runtime_http.json
+
+# Environment files (keep only .env.example)
+.env.local
+.env.*.local
+
+# Data directories (runtime data)
+data/vectorstore/
+data/chat_history.db
+data/game_state/
+data/raw/
+data/processed/
+data/pdf_progress.json
+
+# Model files (large, should be downloaded)
+models/

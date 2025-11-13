@@ -3,25 +3,40 @@ Sentiment Analysis Model
 Loads the fine-tuned sentiment model and provides scoring functionality
 """
 
-import torch
-import numpy as np
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 import logging
+import os
+
+# Lazy import heavy ML dependencies
+try:
+    import torch
+    import numpy as np
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    _ML_DEPS_AVAILABLE = True
+except ImportError:
+    torch = None
+    np = None
+    AutoTokenizer = None
+    AutoModelForSequenceClassification = None
+    _ML_DEPS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 class SentimentModel:
     """Sentiment analysis model for financial text"""
     
-    def __init__(self, model_path: str = "models/sentiment-finetuned"):
+    def __init__(self, model_path: Optional[str] = None):
         """
         Initialize the sentiment model
         
         Args:
-            model_path: Path to the fine-tuned sentiment model
+            model_path: Path to the fine-tuned sentiment model. If not provided,
+                       will read from SENTIMENT_MODEL_DIR environment variable,
+                       defaulting to "models/sentiment-finetuned"
         """
+        if model_path is None:
+            model_path = os.getenv('SENTIMENT_MODEL_DIR', 'models/sentiment-finetuned')
         self.model_path = Path(model_path)
         self.model = None
         self.tokenizer = None
@@ -34,6 +49,23 @@ class SentimentModel:
     
     def _load_model(self):
         """Load the fine-tuned model and tokenizer"""
+        # Check if sentiment analysis is enabled via environment variable
+        enable_sentiment = os.getenv('ENABLE_SENTIMENT_ANALYSIS', 'false').lower() in ('true', '1', 'yes')
+        if not enable_sentiment:
+            logger.info(
+                "Sentiment analysis is disabled (ENABLE_SENTIMENT_ANALYSIS not set to true). "
+                "Set ENABLE_SENTIMENT_ANALYSIS=true to enable sentiment analysis features."
+            )
+            return
+        
+        if not _ML_DEPS_AVAILABLE:
+            logger.warning(
+                "ML dependencies (torch, transformers) not available. "
+                "Sentiment analysis via 'analyze:' prefix will not work. "
+                "The app will continue to function normally for all other features. "
+                "To enable sentiment analysis, install torch and transformers packages."
+            )
+            return
         try:
             # Check if the fine-tuned model exists and has files
             model_files = list(self.model_path.glob("*.json")) + list(self.model_path.glob("*.bin")) + list(self.model_path.glob("*.safetensors"))
@@ -77,7 +109,10 @@ class SentimentModel:
             - probs: List of probabilities for each class [negative, neutral, positive]
         """
         if not self.model or not self.tokenizer:
-            raise RuntimeError("Model not loaded. Please initialize the model first.")
+            raise RuntimeError(
+                "Sentiment model not loaded. ML dependencies (torch, transformers) are not installed. "
+                "Please install these packages to use sentiment analysis features."
+            )
         
         try:
             # Tokenize the input text

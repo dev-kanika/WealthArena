@@ -11,12 +11,13 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
-from datetime import datetime
 
 from ..llm.client import LLMClient
 from ..tools.prices import PriceTool
+from ..tools.retrieval import search_kb, search_all_collections
 from ..models.sentiment import score as sentiment_score
 from ..metrics.prom import record_chat_request
+import logging
 
 router = APIRouter()
 
@@ -26,30 +27,35 @@ llm_client = LLMClient()
 # Initialize tools
 price_tool = PriceTool()
 
+# Setup logging
+logger = logging.getLogger(__name__)
+
+# Lazy load guard prompt
+_guard_prompt = None
+
+def _get_guard_prompt() -> str:
+    """Lazy load guard prompt with graceful fallback"""
+    global _guard_prompt
+    if _guard_prompt is None:
+        try:
+            guard_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "llm", "guard_prompt.txt")
+            with open(guard_path, "r", encoding="utf-8") as f:
+                _guard_prompt = f.read()
+        except Exception as e:
+            # Fallback to default guard prompt if file not found
+            logger.warning(f"Could not load guard prompt from file: {e}. Using default.")
+            _guard_prompt = "You are WealthArena Tutor. Be concise (2–3 sentences). Educational only; no financial advice."
+    return _guard_prompt
+
 class ChatReq(BaseModel):
     message: str
     user_id: Optional[str] = None
     context: Optional[str] = None
 
-class TradeSetupCard(BaseModel):
-    """Trade setup card schema for structured responses"""
-    symbol: str
-    name: str
-    signal: str  # "BUY", "SELL", "HOLD"
-    confidence: float  # 0.0 to 1.0
-    price: float
-    entry: float
-    tp: List[float]  # Take profit levels
-    sl: float  # Stop loss
-    indicators: Dict[str, Any]  # Technical indicators
-    reasoning: str
-    updated_at: datetime
-
 class ChatResp(BaseModel):
     reply: str
     tools_used: List[str]
     trace_id: str
-    card: Optional[TradeSetupCard] = None
 
 @router.post("/chat", response_model=ChatResp)
 async def chat_endpoint(request: ChatReq):
@@ -60,12 +66,49 @@ async def chat_endpoint(request: ChatReq):
         trace_id = f"run-{random.randint(10000, 99999)}"
         tools_used = []
         
+        # Check if tools are enabled (for non-LLM features like sentiment analysis and price queries)
+        enable_tools = os.getenv('ENABLE_TOOLS', 'false').lower() in ('true', '1', 'yes')
+        
         # Check if message starts with "analyze:" for sentiment analysis
         if request.message.lower().startswith("analyze:"):
+            if not enable_tools:
+                return ChatResp(
+                    reply="Non-LLM tools (sentiment analysis, price queries) are currently disabled. To enable these features, set ENABLE_TOOLS=true in your environment configuration.",
+                    tools_used=tools_used,
+                    trace_id=trace_id
+                )
+            
             text_to_analyze = request.message[8:].strip()  # Remove "analyze:" prefix
             if not text_to_analyze:
                 return ChatResp(
                     reply="Please provide text to analyze after 'analyze:'. For example: 'analyze: The stock market is performing well today'",
+                    tools_used=tools_used,
+                    trace_id=trace_id
+                )
+            
+            # Check if sentiment analysis is enabled
+            enable_sentiment = os.getenv('ENABLE_SENTIMENT_ANALYSIS', 'false').lower() in ('true', '1', 'yes')
+            if not enable_sentiment:
+                return ChatResp(
+                    reply="Sentiment analysis is currently disabled. To enable this feature, set ENABLE_SENTIMENT_ANALYSIS=true in your environment configuration.",
+                    tools_used=tools_used,
+                    trace_id=trace_id
+                )
+            
+            # Check if sentiment model is available
+            try:
+                from ..models.sentiment import get_sentiment_model
+                sentiment_model = get_sentiment_model()
+                if sentiment_model.model is None or sentiment_model.tokenizer is None:
+                    return ChatResp(
+                        reply="Sentiment analysis is not available. ML dependencies (torch, transformers) may not be installed, or the model failed to load. Please check your configuration.",
+                        tools_used=tools_used,
+                        trace_id=trace_id
+                    )
+            except Exception as e:
+                logger.warning(f"Could not check sentiment model availability: {e}")
+                return ChatResp(
+                    reply="Sentiment analysis is not available. ML dependencies may not be installed or configured correctly.",
                     tools_used=tools_used,
                     trace_id=trace_id
                 )
@@ -92,7 +135,7 @@ async def chat_endpoint(request: ChatReq):
                     }
                 }
                 
-                reply = f"""📊 **Sentiment Analysis Results**
+                reply = f"""**Sentiment Analysis Results**
 
 **Text:** "{text_to_analyze}"
 
@@ -119,10 +162,28 @@ This analysis is based on a fine-tuned DistilBERT model trained on financial tex
                     trace_id=trace_id
                 )
         
-        # Check if message is asking for price
-        price_match = re.search(r'price\s+([A-Z]+)', request.message, re.IGNORECASE)
+        # Check if message is asking for price (only if tools are enabled)
+        if enable_tools:
+            # Support multiple patterns:
+            # 1. "price SYMBOL" or "SYMBOL price" (natural phrasing)
+            # 2. Forex pairs with optional slash: "EUR/USD" or "EURUSD" (3-6 letters per currency)
+            # 3. Case-insensitive matching
+            price_patterns = [
+                r'price\s+([A-Z]{1,6}(?:/[A-Z]{1,6})?)',  # "price EUR/USD" or "price EURUSD" or "price AAPL"
+                r'([A-Z]{1,6}(?:/[A-Z]{1,6})?)\s+price',  # "EUR/USD price" or "EURUSD price" or "AAPL price"
+            ]
+            price_match = None
+            for pattern in price_patterns:
+                price_match = re.search(pattern, request.message, re.IGNORECASE)
+                if price_match:
+                    break
+        else:
+            price_match = None
+        
         if price_match:
-            ticker = price_match.group(1).upper()
+            # Normalize: remove slash and uppercase
+            # This handles both stock symbols (AAPL) and forex pairs (EUR/USD -> EURUSD)
+            ticker = price_match.group(1).upper().replace('/', '')
             try:
                 price_data = price_tool.get_price(ticker)
                 tools_used.append("get_price")
@@ -136,56 +197,79 @@ This analysis is based on a fine-tuned DistilBERT model trained on financial tex
                     )
                 else:
                     return ChatResp(
-                        reply=f"Sorry, I couldn't get the price for {ticker}. Please check the ticker symbol and try again.",
+                        reply=f"Sorry, I couldn't get the price for {ticker}. The price data is currently unavailable. Please check the ticker symbol and try again later.",
                         tools_used=tools_used,
                         trace_id=trace_id
                     )
             except Exception as e:
                 return ChatResp(
-                    reply=f"Sorry, I couldn't get the price for {ticker}. Please check the ticker symbol and try again.",
+                    reply=f"Sorry, I couldn't get the price for {ticker}. Price data is currently unavailable: {str(e)}. Please check the ticker symbol and try again later.",
                     tools_used=tools_used,
                     trace_id=trace_id
                 )
         
-        # Check if message contains buy/sell keywords for disclaimer
-        message_lower = request.message.lower()
-        has_trading_keywords = any(word in message_lower for word in ["buy", "sell", "trade", "invest", "purchase", "short"])
+        # RAG: Search PDF documents collection for relevant context
+        kb_hits = []
+        kb_context = ""
+        try:
+            # Only search PDF documents collection
+            kb_hits = await search_all_collections(request.message, k=5, collections=['pdf_documents'])
+            if kb_hits:
+                # Format context with source attribution
+                context_parts = []
+                for hit in kb_hits:
+                    meta = hit.get("meta", {})
+                    filename = meta.get("filename", "PDF Document")
+                    source_label = f"PDF: {filename}"
+                    context_parts.append(f'[{source_label}]\n{hit["text"]}\n')
+                kb_context = "\n\n".join(context_parts)
+                tools_used.append("pdf_search")
+                logger.info(f"Retrieved {len(kb_hits)} PDF document chunks for chat query")
+        except Exception as e:
+            logger.warning(f"PDF document search failed: {e}. Continuing without context.")
         
-        # Build system prompt with disclaimer if needed
-        system_prompt = "You are a helpful trading education assistant. Always provide educational content only, never financial advice."
-        if has_trading_keywords:
-            system_prompt += " IMPORTANT: If the user is asking about buying or selling, remind them that this is educational content only and they should consult with a qualified financial advisor before making any investment decisions. Always practice with paper trading first!"
+        # Check if message is asking for actual trading advice (not just educational questions)
+        # Only flag if it's a direct action request, not educational questions
+        message_lower = request.message.lower()
+        # Look for action-oriented phrases, not just the word "trade" in educational contexts
+        action_phrases = [
+            "should i buy", "should i sell", "should i trade", "should i invest",
+            "buy now", "sell now", "trade now", "invest now",
+            "what should i buy", "what should i sell", "what should i trade",
+            "recommend buying", "recommend selling", "recommend trading"
+        ]
+        has_trading_action = any(phrase in message_lower for phrase in action_phrases)
+        
+        # Get guard prompt for safety
+        guard_prompt = _get_guard_prompt()
+        
+        # Build system prompt with guard prompt and disclaimer
+        system_prompt = guard_prompt
+        if has_trading_action:
+            system_prompt += "\n\nIMPORTANT: If the user is asking for trading advice or recommendations, remind them that this is educational content only and they should consult with a qualified financial advisor before making any investment decisions. Always practice with paper trading first!"
+        
+        # Prepare user message with KB context if available
+        user_content = request.message
+        if kb_context:
+            user_content = f"QUESTION: {request.message}\n\nCONTEXT FROM KNOWLEDGE BASE:\n{kb_context}\n\nPlease answer the question using the context provided. If the context doesn't contain relevant information, say so."
         
         # Prepare messages for LLM
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": request.message}
+            {"role": "user", "content": user_content}
         ]
         
-        # Add context if provided
+        # Add context if provided (from request)
         if request.context:
             messages.append({"role": "system", "content": f"Additional context: {request.context}"})
         
         # Get LLM response using new chat method
-        reply = await llm_client.chat(messages)
-        tools_used.append("llm_client")
-        
-        # Check if this is a trade setup request and create card if needed
-        card = None
-        if _is_trade_setup_request(request.message):
-            card = _create_trade_setup_card(request.message, reply)
-            if card:
-                tools_used.append("trade_setup_card")
-        
-        # Check for specific /setup for SYMBOL pattern
-        setup_match = re.search(r'/setup for ([A-Z]{1,5})', request.message, re.IGNORECASE)
-        if setup_match:
-            symbol = setup_match.group(1).upper()
-            card = _create_trade_setup_card_for_symbol(symbol)
-            if card:
-                tools_used.append("trade_setup_card")
-                # Override the reply with a specific message for setup requests
-                reply = f"📊 **Trade Setup for {symbol}**\n\nI've analyzed {symbol} and created a trade setup card with technical indicators, entry/exit levels, and risk management parameters. This is educational content only - always practice with paper trading first!"
+        try:
+            reply = await llm_client.chat(messages)
+            tools_used.append("llm_client")
+        except Exception as e:
+            logger.error(f"LLM call failed: {e}")
+            raise
         
         # Record successful chat request
         latency = time.time() - start_time
@@ -194,8 +278,7 @@ This analysis is based on a fine-tuned DistilBERT model trained on financial tex
         return ChatResp(
             reply=reply,
             tools_used=tools_used,
-            trace_id=trace_id,
-            card=card
+            trace_id=trace_id
         )
         
     except Exception as e:
@@ -203,8 +286,14 @@ This analysis is based on a fine-tuned DistilBERT model trained on financial tex
         latency = time.time() - start_time
         record_chat_request("error", latency)
         
+        error_message = str(e)
+        if "GROQ_API_KEY" in error_message or "API key" in error_message.lower():
+            user_message = "LLM service unavailable. Please check GROQ_API_KEY configuration in your .env file. Get your key from https://console.groq.com/"
+        else:
+            user_message = f"LLM service unavailable: {error_message}. Please check your configuration and try again."
+        
         return ChatResp(
-            reply=f"I apologize, but I encountered an error: {str(e)}. Please try again.",
+            reply=user_message,
             tools_used=[],
             trace_id=f"run-{random.randint(10000, 99999)}"
         )
@@ -218,148 +307,4 @@ async def get_chat_history():
 async def clear_chat_history():
     """Clear chat history (placeholder)"""
     return {"message": "Chat history cleared"}
-
-def _is_trade_setup_request(message: str) -> bool:
-    """Check if the message is asking for a trade setup"""
-    message_lower = message.lower()
-    setup_keywords = ["setup for", "trade setup", "trading setup", "setup", "analysis for"]
-    return any(keyword in message_lower for keyword in setup_keywords)
-
-def _create_trade_setup_card_for_symbol(symbol: str) -> Optional[TradeSetupCard]:
-    """Create a TradeSetupCard for a specific symbol"""
-    try:
-        # Get current price for the symbol
-        try:
-            price_data = price_tool.get_price(symbol)
-            current_price = price_data["price"] if price_data["price"] is not None else 100.0
-        except:
-            current_price = 100.0  # Fallback price
-        
-        # Generate mock technical indicators
-        indicators = {
-            "rsi": round(random.uniform(30, 70), 1),
-            "sma_20": round(current_price * random.uniform(0.95, 1.05), 2),
-            "sma_50": round(current_price * random.uniform(0.90, 1.10), 2),
-            "volume": random.randint(1000000, 10000000),
-            "macd": round(random.uniform(-2, 2), 3),
-            "bollinger_upper": round(current_price * 1.02, 2),
-            "bollinger_lower": round(current_price * 0.98, 2)
-        }
-        
-        # Determine signal based on indicators
-        if indicators["rsi"] < 30:
-            signal = "BUY"
-            confidence = 0.8
-        elif indicators["rsi"] > 70:
-            signal = "SELL"
-            confidence = 0.8
-        else:
-            signal = "HOLD"
-            confidence = 0.6
-        
-        # Calculate entry, take profit, and stop loss
-        entry = current_price
-        if signal == "BUY":
-            tp = [entry * 1.05, entry * 1.10]  # 5% and 10% profit targets
-            sl = entry * 0.95  # 5% stop loss
-        elif signal == "SELL":
-            tp = [entry * 0.95, entry * 0.90]  # 5% and 10% profit targets
-            sl = entry * 1.05  # 5% stop loss
-        else:
-            tp = []
-            sl = entry
-        
-        # Create the card
-        card = TradeSetupCard(
-            symbol=symbol,
-            name=f"{symbol} Stock",
-            signal=signal,
-            confidence=confidence,
-            price=current_price,
-            entry=entry,
-            tp=tp,
-            sl=sl,
-            indicators=indicators,
-            reasoning=f"Based on technical analysis: RSI at {indicators['rsi']}, moving averages showing {'bullish' if indicators['sma_20'] > indicators['sma_50'] else 'bearish'} trend. This is educational content only - always practice with paper trading first!",
-            updated_at=datetime.now()
-        )
-        
-        return card
-        
-    except Exception as e:
-        # If card creation fails, return None
-        return None
-
-def _create_trade_setup_card(message: str, reply: str) -> Optional[TradeSetupCard]:
-    """Create a TradeSetupCard from the message and reply"""
-    try:
-        # Extract symbol from message
-        symbol_match = re.search(r'setup for\s+([A-Z]+)', message, re.IGNORECASE)
-        if not symbol_match:
-            # Try alternative patterns
-            symbol_match = re.search(r'([A-Z]{2,5})', message)
-        
-        if not symbol_match:
-            return None
-            
-        symbol = symbol_match.group(1).upper()
-        
-        # Get current price for the symbol
-        try:
-            price_data = price_tool.get_price(symbol)
-            current_price = price_data["price"] if price_data["price"] is not None else 100.0
-        except:
-            current_price = 100.0  # Fallback price
-        
-        # Generate mock technical indicators
-        indicators = {
-            "rsi": round(random.uniform(30, 70), 1),
-            "sma_20": round(current_price * random.uniform(0.95, 1.05), 2),
-            "sma_50": round(current_price * random.uniform(0.90, 1.10), 2),
-            "volume": random.randint(1000000, 10000000)
-        }
-        
-        # Determine signal based on indicators
-        if indicators["rsi"] < 30:
-            signal = "BUY"
-            confidence = 0.8
-        elif indicators["rsi"] > 70:
-            signal = "SELL"
-            confidence = 0.8
-        else:
-            signal = "HOLD"
-            confidence = 0.6
-        
-        # Calculate entry, take profit, and stop loss
-        entry = current_price
-        if signal == "BUY":
-            tp = [entry * 1.05, entry * 1.10]  # 5% and 10% profit targets
-            sl = entry * 0.95  # 5% stop loss
-        elif signal == "SELL":
-            tp = [entry * 0.95, entry * 0.90]  # 5% and 10% profit targets
-            sl = entry * 1.05  # 5% stop loss
-        else:
-            tp = []
-            sl = entry
-        
-        # Create the card
-        card = TradeSetupCard(
-            symbol=symbol,
-            name=f"{symbol} Stock",
-            signal=signal,
-            confidence=confidence,
-            price=current_price,
-            entry=entry,
-            tp=tp,
-            sl=sl,
-            indicators=indicators,
-            reasoning=f"Based on technical analysis: RSI at {indicators['rsi']}, moving averages showing {'bullish' if indicators['sma_20'] > indicators['sma_50'] else 'bearish'} trend. This is educational content only - always practice with paper trading first!",
-            updated_at=datetime.now()
-        )
-        
-        return card
-        
-    except Exception as e:
-        # If card creation fails, return None
-        return None
 
