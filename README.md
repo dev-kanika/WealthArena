@@ -1,720 +1,576 @@
-# WealthArena - AI Trading Education Platform
+# WealthArena
 
-A comprehensive trading education platform with AI-powered chat, sentiment analysis, and financial data integration.
+WealthArena is a multi-agent investing insights platform combining reinforcement learning, real-time market analytics, and gamified education.
 
-## ⚠️ First Time Setup
+## Key Features
 
-**IMPORTANT**: You must start the server before running any tests. The `dev_up.ps1` script handles everything automatically.
+- **AI-powered trading signals** (70%+ win rate target)
+- **Educational chatbot** with RAG capabilities
+- **Historical fast-forward investing game**
+- **Real-time leaderboard**
+- **Comprehensive portfolio management**
 
-**Expected time**: 2-3 minutes for first run, 30 seconds for subsequent runs.
+## Technology Stack
 
----
+- **Frontend**: React Native (Expo)
+- **Backend**: Node.js (Express)
+- **Chatbot**: Python (FastAPI)
+- **RL Service**: Python (Flask)
+- **Database**: Azure SQL / Cloud SQL PostgreSQL
+- **Deployment**: Azure Web Apps / GCP App Engine
 
-## 🚀 Quick Start
+## Architecture
 
-### Step 1: Start the Development Server
-
-```powershell
-# Copy environment file (if not already done)
-copy .env.example .env
-
-# Edit .env and add your GROQ_API_KEY
-
-# Start the server (first time setup)
-powershell -ExecutionPolicy Bypass -File scripts/dev_up.ps1
+```mermaid
+graph TD
+    A[Mobile App - React Native] --> B[Backend API - Node.js]
+    B --> C[Azure SQL / Cloud SQL]
+    B --> D[Chatbot Service - FastAPI]
+    B --> E[RL Inference Service - Flask]
+    E --> C
+    D --> F[GROQ LLM API]
+    D --> G[Chroma Vector DB]
+    E --> H[Trained RL Models]
+    I[Data Pipeline] --> C
+    I --> J[Azure Blob / Cloud Storage]
 ```
 
-The script will:
-- ✅ Create a virtual environment (`.venv`)
-- ✅ Install minimal runtime dependencies
-- ✅ Ingest Knowledge Base into vector database
-- ✅ Start the API server on port 8000
+## Repository Structure
 
-**Wait for the server to start** - you'll see "Server started successfully!" message.
+- `frontend/`: Expo mobile app (React Native)
+- `backend/`: Express API server (14 route modules)
+- `chatbot/`: FastAPI chatbot with RAG (11 routers)
+- `rl-service/`: Flask RL inference API (6 endpoints)
+- `rl-training/`: RL model training code (Ray RLlib)
+- `data-pipeline/`: Market data ingestion (443 symbols, 5 asset classes)
+- `database/`: SQL schemas for Azure and GCP
+- `infrastructure/`: Deployment scripts for Azure and GCP
+- `docs/`: Comprehensive documentation
 
-### Step 2: Verify Server is Running (in a NEW terminal)
+## Quick Start
+
+### Prerequisites
+- Node.js 18+
+- Python 3.8+ (required for data-pipeline scripts)
+- Azure CLI or gcloud CLI
+- **GroQ API Key** (get from https://console.groq.com) - Required for chatbot
+
+### Setup Options
+
+#### Option 1: Simplified Setup (Recommended for Local Development)
+
+**Best for**: Quick local development with mock database
 
 ```powershell
-python scripts/check_server.py
+.\master_setup_simplified.ps1
 ```
 
-Expected output: `✅ All prerequisites met! Server is ready.`
+This script:
+- Configures environment variables
+- Sets up network configuration
+- Prepares all services
+- Handles data pipeline setup (Phase 3.5)
+- Auto-detects local IP for mobile device testing
 
-### Step 3: Run the Metrics Test
+**Data Pipeline Setup (Phase 3.5):**
+- Automatically checks if market data exists
+- If insufficient data is found (<10 CSV files), you'll be prompted to download data
+- **MVP Mode (Recommended)**: Downloads ~50 stocks, faster setup (5-10 minutes)
+- **Full Mode**: Downloads all stocks, complete dataset (30-60 minutes)
+- Backend will auto-load CSV data on startup (~30 seconds)
+
+#### Option 2: Full Local Setup (Complete Database Setup)
+
+**Best for**: Full local development with PostgreSQL database
 
 ```powershell
-python scripts/print_metrics.py --url http://127.0.0.1:8000 --runs 5
+.\master_setup_local.ps1
 ```
 
-**API will be available at:**
-- Health Check: http://127.0.0.1:8000/healthz
-- API Docs: http://127.0.0.1:8000/docs
-- Interactive docs: http://127.0.0.1:8000/docs
+This script provides comprehensive setup including:
+- Full dependency installation
+- Database schema creation
+- Data pipeline execution
+- Windows Task Scheduler setup for daily data refresh
+- APK build configuration
 
----
+**Script Parameters:**
+- `-SkipDependencies`: Skip npm/pip installations
+- `-SkipDataDownload`: Skip market data download
+- `-SkipDataProcessing`: Skip data processing step
+- `-SkipAPKBuild`: Skip Android APK build
+- `-DatabaseType`: `azuresql`, `postgresql`, or `skip` (default: `azuresql`)
+- `-LocalIPOverride`: Manually specify local IP address
 
-## 🚨 Common Issues
+### First Time Setup Checklist
 
-If you encounter problems, see the [Troubleshooting Guide](docs/TROUBLESHOOTING.md) for detailed solutions.
+1. **Run Setup Script**
+   ```powershell
+   .\master_setup_simplified.ps1
+   ```
+   
+2. **Verify Backend is Running**
+   - Check that backend is running on port 3000
+   - Verify database connection using `/api/health` endpoint
+   - Test database connectivity: `http://localhost:3000/health`
 
-**Quick fixes:**
-- **Server not running** → See [TROUBLESHOOTING.md Section 2](docs/TROUBLESHOOTING.md#section-2-server-not-running-issues)
-- **Connection refused** → See [TROUBLESHOOTING.md Section 2](docs/TROUBLESHOOTING.md#section-2-server-not-running-issues)
-- **Port already in use** → See [TROUBLESHOOTING.md Section 3](docs/TROUBLESHOOTING.md#section-3-port-conflicts)
-- **Import errors** → See [TROUBLESHOOTING.md Section 4](docs/TROUBLESHOOTING.md#section-4-dependency-issues)
+3. **Check Database Connection**
+   - Ensure database credentials are correct in `backend/.env.local`
+   - Verify database is accessible from backend service
+   - Check that database schema is created (see `database/` folder)
 
-### PDF Ingestion Issues
+4. **Load CSV Data into Database**
+   - **Mock Database Mode (USE_MOCK_DB=true)**: Data loads automatically on backend startup
+     - Checks if local storage is empty (<10 records) or data is stale (>24h old)
+     - Runs in background after server starts (non-blocking)
+     - Logs: `✓ Market data loaded: X symbols, Y records` on success
+     - Data is stored in `backend/data/local-market-data.json`
+   - **Real Database Mode**: Data must be loaded manually via API endpoints
+     - Call `POST /api/market-data/initialize` endpoint (requires authentication)
+     - Or use `POST /api/market-data/update-database` endpoint
+   - Verify data loaded: `GET /api/market-data/data-status` endpoint
 
-**Problem**: PDF ingestion gets stuck or takes hours
+5. **Verify Data Loaded Successfully**
+   - Check data status: `GET /api/market-data/data-status`
+   - Should show symbol count > 0 and available asset types
+   - Test with: `GET /api/market-data/available-symbols`
+
+### Data Pipeline Setup
+
+Market data is required for the WealthArena application to function properly. The setup script (`master_setup_simplified.ps1`) handles data pipeline setup automatically in Phase 3.5.
+
+#### Automatic Data Pipeline Setup
+
+When running `master_setup_simplified.ps1`, the script will:
+
+1. **Check Python Installation**: Verifies Python 3.8+ is installed and accessible
+2. **Install Dependencies**: Installs Python packages from `data-pipeline/requirements.txt`
+3. **Check Existing Data**: Scans for CSV files in data folders
+4. **Prompt for Download** (if needed): If insufficient data is found (<10 files), offers two options:
+   - **MVP Mode (Recommended)**: Downloads ~50 stocks, faster setup (5-10 minutes)
+     - Limited dataset for faster development and testing
+     - Suitable for most use cases
+   - **Full Mode**: Downloads all stocks, complete dataset (30-60 minutes)
+     - Complete historical data for all symbols
+     - Recommended for production or comprehensive testing
+
+#### Manual Data Pipeline Execution
+
+For advanced users who want to manually run data-pipeline scripts:
+
+```powershell
+cd data-pipeline
+pip install -r requirements.txt
+python run_all_downloaders.py --mvp-mode --asx-limit 50
+```
+
+**Data Download Options:**
+- MVP mode: `python run_all_downloaders.py --mvp-mode --asx-limit 50`
+- Full mode: `python run_all_downloaders.py`
+
+The backend will automatically load CSV files from data folders on startup (~30 seconds). Processed data is stored in `backend/data/local-market-data.json`.
+
+#### Data Storage Locations
+
+Market data CSV files are stored in the following folders:
+
+- `stockDataRaw&Processed/` - Stock market data
+- `cryptoData/` - Cryptocurrency data
+- `forexData/` - Forex (currency) data
+- `commoditiesData/` - Commodity data
+
+**Legacy locations** (also supported):
+- `data-pipeline/data/raw/stocks/`
+- `data-pipeline/data/raw/crypto/`
+- `data-pipeline/data/raw/forex/`
+- `data-pipeline/data/raw/commodities/`
+
+### Data Setup
+
+#### Loading Local CSV Data into Database
+
+The app uses local CSV files stored in root-level folders:
+- `stockDataRaw&Processed/` - Stock market data
+- `cryptoData/` - Cryptocurrency data
+- `forexData/` - Forex (currency) data
+- `commoditiesData/` - Commodity data
+
+**Expected Folder Structure:**
+```
+WealthArena_Production/
+├── stockDataRaw&Processed/
+│   ├── AAPL_raw.csv
+│   ├── MSFT_raw.csv
+│   └── ...
+├── cryptoData/
+│   ├── BTC_raw.csv
+│   ├── ETH_raw.csv
+│   └── ...
+├── forexData/
+│   ├── AUDUSD_raw.csv
+│   └── ...
+└── commoditiesData/
+    ├── GOLD_raw.csv
+    └── ...
+```
+
+**How to Load Data:**
+
+The data loading behavior depends on the database mode:
+
+1. **Mock Database Mode (USE_MOCK_DB=true) - Automatic Loading**
+   - Data loads automatically on backend startup (runs in background)
+   - Leverages background initialization in `backend/src/server.ts`
+   - Checks if local storage is empty (<10 records) or data is stale (>24h old)
+   - Loads CSV files from data folders and stores in `backend/data/local-market-data.json`
+   - Check backend logs for: `✓ Market data loaded: X symbols, Y records`
+   - This is the default mode for simplified local development setup
+
+2. **Real Database Mode - Manual Loading Required**
+   - Data must be loaded manually via API endpoints
+   - No automatic loading occurs in real database mode
+   ```bash
+   # Using curl (requires authentication token)
+   curl -X POST http://localhost:3000/api/market-data/initialize \
+     -H "Authorization: Bearer YOUR_TOKEN"
+   
+   # Or use the update endpoint
+   curl -X POST http://localhost:3000/api/market-data/update-database \
+     -H "Authorization: Bearer YOUR_TOKEN"
+   ```
+
+3. **Verify Data Loaded**
+   ```bash
+   # Check data status
+   curl http://localhost:3000/api/market-data/data-status \
+     -H "Authorization: Bearer YOUR_TOKEN"
+   
+   # Get available symbols
+   curl http://localhost:3000/api/market-data/available-symbols \
+     -H "Authorization: Bearer YOUR_TOKEN"
+   ```
+
+**CSV File Format:**
+- Files should contain columns: `Date`, `Open`, `High`, `Low`, `Close`, `Volume`
+- Alternative column names supported: `date`, `open`, `high`, `low`, `close`, `volume`
+- Date format: ISO (YYYY-MM-DD) or standard date formats
+
+## Troubleshooting
+
+### Database Fetch Failed
+**Error**: `Database fetch failed, trying fallbacks...` or `Failed to fetch market data`
 
 **Solutions**:
+1. Check network configuration:
+   - Verify `EXPO_PUBLIC_BACKEND_URL` is set in `.env.local`
+   - Run `master_setup_simplified.ps1` to reconfigure
+   - Check backend is running: `http://localhost:3000/health`
 
-1. **Use smaller batch sizes** for better progress feedback:
+2. Verify database connection:
+   - Check `backend/.env.local` has correct database credentials
+   - Test connection: Backend should show "Database: Connected" on startup
+   - Check database logs for connection errors
 
-   ```bash
-   python scripts/pdf_ingest.py --batch-size 20 --duplicate-check-batch-size 200
+3. Ensure data is loaded:
+   - Call `POST /api/market-data/initialize` to load CSV data
+   - Verify with `GET /api/market-data/data-status`
+   - Check backend logs for data loading errors
+
+### No Market Data Available
+**Error**: `No market data available` or `No symbols have data available`
+
+**Solutions**:
+1. **Run data-pipeline scripts manually**:
+   ```powershell
+   cd data-pipeline
+   pip install -r requirements.txt
+   python run_all_downloaders.py --mvp-mode --asx-limit 50
    ```
+   Check that CSV files exist in `stockDataRaw&Processed/`, `cryptoData/`, etc.
 
-2. **Enable parallel processing** (process 2-3 PDFs at once):
+2. **Verify data folders**:
+   - Check that data folders exist at root level
+   - Ensure CSV files are named correctly (e.g., `AAPL_raw.csv`)
+   - Verify CSV files have valid data (not empty)
 
-   ```bash
-   python scripts/pdf_ingest.py --parallel --max-workers 2
+3. **Check backend console for data loading**:
+   - Review backend logs for "Processing..." messages
+   - Look for: `✓ Market data loaded: X symbols, Y records`
+   - Check backend console for data loading progress messages
+
+4. **Verify Python installation**:
+   - Check Python is installed: `python --version`
+   - Ensure Python 3.8+ is available
+   - Verify internet connectivity for data download
+
+### Backend Starts but No Market Data Available
+**Error**: Backend starts successfully but has 0 symbols available for charts, games, and AI gameplay
+
+**Solutions**:
+1. **Run data-pipeline scripts manually**:
+   ```powershell
+   cd data-pipeline
+   pip install -r requirements.txt
+   python run_all_downloaders.py --mvp-mode --asx-limit 50
    ```
-
-3. **Resume interrupted uploads**:
-
-   ```bash
-   # Resume (partials are saved by default)
-   python scripts/pdf_ingest.py --resume
    
-   # Resume but retry partial ingestions
-   python scripts/pdf_ingest.py --resume --no-resume-partial
-   ```
+2. **Check that CSV files exist in data folders**:
+   - Verify `stockDataRaw&Processed/`, `cryptoData/`, `forexData/`, `commoditiesData/` contain CSV files
+   - Check file naming: files should end with `_raw.csv` (e.g., `AAPL_raw.csv`)
+   - Ensure files are not empty (should have data rows)
 
-4. **Skip problematic PDFs** and continue:
+3. **Check backend console for data loading messages**:
+   - Look for: `✓ Market data loaded: X symbols, Y records`
+   - Check for errors: `Error loading market data: ...`
+   - Verify data loading status in backend logs
 
-   ```bash
-   python scripts/pdf_ingest.py --skip-on-error
-   ```
+### Data Download Fails
+**Error**: Data download fails during Phase 3.5 or manual execution
 
-5. **Check progress**: Look for log messages showing batch progress (e.g., "Processing batch 3/10")
+**Solutions**:
+1. **Check Python installation**:
+   - Verify Python 3.8+ is installed: `python --version`
+   - Ensure Python is added to PATH
+   - Restart PowerShell after installing Python
 
-6. **First-time setup**: The first PDF takes longer (downloads embedding model ~80MB)
+2. **Verify internet connectivity**:
+   - Check network connection
+   - Test API access: `python -c "import requests; print(requests.get('https://api.github.com').status_code)"`
 
-**Performance Tips**:
+3. **Check data-pipeline console output**:
+   - Review error messages in console
+   - Check for API rate limiting or connection errors
+   - Verify `automation_config.yaml` exists and is valid
 
-- Typical processing time: 2-5 minutes per PDF (depends on size and CPU)
-- First batch is slowest (model download + initialization)
-- Subsequent batches are faster (model cached)
-- Use `--parallel` for 20+ PDFs to save time
+4. **Manual troubleshooting**:
+   - Try running `python run_all_downloaders.py --mvp-mode` directly
+   - Check `data-pipeline/requirements.txt` dependencies are installed
+   - Review data-pipeline logs for specific errors
 
-## 🚀 Alternative Setup (Manual)
+### Game Session Not Found
+**Error**: `Game session not found` or `Failed to resume game session`
 
-### 1. Environment Setup
-```bash
-# Create virtual environment
-python -m venv .venv
+**Solutions**:
+1. Ensure backend is running:
+   - Check `http://localhost:3000/health` responds
+   - Verify backend logs show no errors
+   - Restart backend if needed
 
-# Activate virtual environment
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
+2. Verify database connection:
+   - Backend should show "Database: Connected" on startup
+   - Check database credentials in `backend/.env.local`
+   - Test database queries manually if needed
 
-# Install dependencies
-pip install -r requirements.txt
-```
+3. Check symbol data availability:
+   - Ensure selected symbols have data in database
+   - Use `GET /api/market-data/available-symbols` to verify
+   - Select symbols that have been loaded from CSV files
 
-### 2. Environment Configuration
+### RL Service Timeout
+**Error**: `RL service unavailable` or `Request timeout`
 
-**Get Your Groq API Key (REQUIRED):**
-1. Visit https://console.groq.com/
-2. Sign up or log in
-3. Go to API Keys section
-4. Create a new API key
-5. Copy the key (starts with `gsk_`)
+**Solutions**:
+1. RL service is optional:
+   - App works without RL service (falls back to backend signals)
+   - This is expected behavior if RL service is not running
+   - Check logs show: "RL service unavailable, using backend signals"
 
-**IMPORTANT:** The application requires a valid Groq API key to function. Without it, all LLM-powered features will be unavailable.
+2. If you want RL service:
+   - Ensure RL service is running on port 5002
+   - Check `EXPO_PUBLIC_RL_SERVICE_URL` is configured
+   - Verify RL service health endpoint responds
 
-**Create and Configure .env File:**
-```bash
-# Copy the example file
-cp .env.example .env
-```
+### Array Handling Errors in News
+**Error**: `trendingData.articles.map is not a function` or similar
 
-Edit `.env` and add your API key (REQUIRED):
-```env
-GROQ_API_KEY=gsk_your_actual_key_here  # REQUIRED: Replace with your actual Groq API key from https://console.groq.com/
-GROQ_MODEL=llama3-8b-8192
-LLM_PROVIDER=groq
-CHROMA_PERSIST_DIR=data/vectorstore  # Use absolute path for reliability
-APP_HOST=0.0.0.0
-APP_PORT=8000
+**Solutions**:
+1. This is now fixed with proper type checking
+   - Code validates arrays before calling `.map()`
+   - Returns empty arrays if data format is unexpected
+   - Check logs for warnings about unexpected data formats
 
-# PDF Ingestion Configuration (optional)
-PDF_INGEST_INTERVAL_HOURS=24  # Background job interval for PDF ingestion
-ENABLE_PDF_INGESTION=true     # Enable automatic PDF ingestion
-```
+2. Verify API responses:
+   - Check backend `/api/market-data/trending` endpoint format
+   - Ensure chatbot search API returns expected format
+   - Review API response structures in logs
 
-### 3. Run the API Server
-```bash
-# Development mode
-python -m uvicorn app.main:app --reload
+### Chatbot GroQ API Issues
 
-# Production mode
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+For detailed chatbot troubleshooting, see:
+- `chatbot/docs/TROUBLESHOOTING.md` - Comprehensive troubleshooting guide
+- Common issues include:
+  - **GROQ_API_KEY not set**: Ensure `.env` file has valid GroQ API key
+  - **Model decommissioned**: Update `GROQ_MODEL` to `llama-3.1-8b-instant` or `llama-3.1-70b-versatile`
+  - **Connection refused**: Ensure chatbot service is running on port 8000
+  - **Port conflicts**: Check if port 8000 is already in use
 
-The API will be available at: `http://localhost:8000`
+## API Endpoint Documentation
 
-### 4. Docker Setup (Alternative)
-```bash
-# Build and run with Docker
-docker-compose up --build
+### Market Data Endpoints
 
-# Run in background
-docker-compose up -d
-```
+**Initialize Database**
+- `POST /api/market-data/initialize`
+- Requires authentication
+- Loads CSV data from raw files into database
+- Returns: `{ success, symbolsLoaded, recordsLoaded, ... }`
 
-## 📡 API Endpoints (Handoff Quickstart)
+**Check Data Status**
+- `GET /api/market-data/data-status`
+- Requires authentication
+- Returns: `{ hasData, symbolCount, assetTypes, sampleSymbols, lastUpdate }`
 
-### Page 4 – Chat & Knowledge
-- **POST** `/v1/chat` → `{"message":"..."}`  # uses Groq; "analyze: ..." hits local sentiment
-- **GET/POST** `/v1/chat/stream` → Server-Sent Events (SSE) with `Content-Type: text/event-stream`. Format: `data: {"chunk": "...", "index": 0}\n\n`. Supports query params (GET) or JSON body (POST).
-- **GET** `/v1/search?q=&k=5`
-- **POST** `/v1/explain` → `{"question":"...", "k":3}`
-- **POST** `/v1/chat/history`
-- **GET** `/v1/chat/history?user_id=`
-- **POST** `/v1/chat/feedback` → `{"message_id":"...","vote":"up"|"down"}`
-- **GET** `/v1/chat/export?user_id=`
+**Get Available Symbols**
+- `GET /api/market-data/available-symbols?assetType=stock`
+- Requires authentication
+- Returns: `string[]` - List of available symbols
 
-### Page 3 – Game Mode
-- **GET** `/v1/game/episodes`
-- **POST** `/v1/game/start` → `{"user_id":"u1","episode_id":"covid_crash_2020","difficulty":"medium"}`
-- **POST** `/v1/game/tick` → `{"game_id":"...","speed":1}`
-- **POST** `/v1/game/trade` → `{"game_id":"...","symbol":"AAPL","side":"buy","qty":5,"type":"market"}`
-- **GET** `/v1/game/portfolio?game_id=...`
-- **GET** `/v1/game/summary?game_id=...`
-- **WS** `/v1/game/stream?game_id=...`
+**Get Historical Data**
+- `GET /api/market-data/history/:symbol?period=1mo&days=30`
+- Requires authentication
+- Returns: `{ success, data: [{ time, open, high, low, close, volume }] }`
 
-### Metrics & Documentation
-- **GET** `/metrics`            # Prometheus metrics
-- **GET** `/metrics/basic`      # JSON summary
-- **GET** `/openapi.json`       # OpenAPI specification
-- **GET** `/docs`               # Interactive API documentation
-- **GET** `/healthz`            # Health check
+**Update Database**
+- `POST /api/market-data/update-database`
+- Requires authentication
+- Manually triggers CSV data loading
+- Returns: `{ success, symbolsProcessed, totalRecords, errors, loadedSymbols }`
 
-### Background Jobs & Data Pipeline
-- **GET** `/v1/background/status` → Job health and last run times
+### Authentication Required Endpoints
+- All `/api/market-data/*` endpoints require authentication
+- Use `Authorization: Bearer <token>` header
+- Get token by logging in: `POST /api/auth/login`
 
-## 📊 RAG Data Pipeline
+### Endpoints That Don't Require Authentication
+- `GET /health` - Health check
+- `GET /` - API documentation
+- `POST /api/auth/signup` - User signup
+- `POST /api/auth/login` - User login
+
+## Deployment
+
+- **Frontend**: See `frontend/README.md` for deployment instructions
+- **Backend**: See `backend/README.md` and `backend/TROUBLESHOOTING.md` for deployment troubleshooting
+- **Chatbot**: See `chatbot/README.md` and `chatbot/docs/TROUBLESHOOTING.md`
+- **RL Training**: See `rl-training/README.md` for local and Azure deployment
+- **Azure**: Follow `docs/deployment/PHASE11_AZURE_DEPLOYMENT_GUIDE.md`
+- **GCP**: Follow `docs/deployment/PHASE12_GCP_DEPLOYMENT_GUIDE.md`
+
+## Development
+
+- Local database setup (Azure SQL or PostgreSQL)
+- Data pipeline execution for market data
+- Model training (optional, use pre-trained models)
+
+## Testing
 
 ### Overview
+WealthArena uses Jest for TypeScript/JavaScript services and pytest for Python services.
 
-WealthArena uses a RAG (Retrieval Augmented Generation) system that combines:
+### Running Tests
 
-- **Knowledge Base**: Curated educational content (markdown files from `docs/kb/`)
-- **PDF Documents**: User-uploaded PDF files from the `docs/` directory
+**Backend**:
+```bash
+cd backend
+npm test              # Run tests with coverage
+npm run test:watch    # Watch mode
+npm run test:ci       # CI mode with JUnit output
+```
 
-### PDF Ingestion
+**Frontend**:
+```bash
+cd frontend
+npm test              # Run tests with coverage
+npm run test:watch    # Watch mode
+npm run test:ci       # CI mode
+```
 
-Process PDF files from the `docs/` directory:
+**Python Services**:
+```bash
+# Chatbot
+cd chatbot
+pytest --cov=app --cov-report=xml --cov-report=term
+
+# RL Training
+cd rl-training
+pytest --cov=src --cov-report=xml --cov-report=term
+# See rl-training/TESTING_AND_COVERAGE.md for detailed testing guide
+
+# RL Service
+cd rl-service
+pytest --cov=api --cov-report=xml --cov-report=term
+```
+
+### Coverage Reports
+- Backend: `backend/coverage/lcov.info`
+- Frontend: `frontend/coverage/lcov.info`
+- Python: `coverage.xml` in each service directory
+
+### Testing Guides
+- Backend: See `backend/TESTING_GUIDE.md`
+- Frontend: See `frontend/TESTING.md`
+- Python Services: See service-specific testing guides
+
+### SonarQube Scanning
+
+Run SonarQube analysis with the provided script:
 
 ```bash
-# Basic usage
-python scripts/pdf_ingest.py
+# Windows
+scripts\run_sonarqube_scan.bat <group_id> <repo_name>
 
-# With parallel processing (recommended for 20+ PDFs)
-python scripts/pdf_ingest.py --parallel --max-workers 2
-
-# Optimized defaults for parallel processing (recommended for 20+ PDFs)
-python scripts/pdf_ingest.py --parallel --max-workers 2 --batch-size 30 --duplicate-check-batch-size 200 --skip-on-error --resume
-
-# Resume interrupted uploads (partials are saved by default)
-python scripts/pdf_ingest.py --resume
-
-# Resume but retry partial ingestions on next run
-python scripts/pdf_ingest.py --resume --no-resume-partial
-
-# Optimized batch sizes for better progress feedback
-python scripts/pdf_ingest.py --batch-size 30 --duplicate-check-batch-size 200
-
-# Skip problematic PDFs and continue
-python scripts/pdf_ingest.py --skip-on-error
+# Example
+scripts\run_sonarqube_scan.bat F25 WealthArena
 ```
 
-See [PDF Ingestion Issues](#pdf-ingestion-issues) section for troubleshooting.
+This will:
+1. Run all tests (backend, frontend, Python services)
+2. Generate coverage reports
+3. Execute SonarQube scan with project key: `AIP-F25-<group_id>_<repo_name>`
 
-### Initial Setup
+**Note**: Set `SONAR_TOKEN` environment variable for authentication, or the script will prompt for it.
 
+## Metrics
+
+### Overview
+WealthArena collects metrics using Prometheus for backend/RL services and comprehensive_metrics for aggregation.
+
+### Metrics Endpoints
+- **Backend**: `http://localhost:3000/api/metrics` (Prometheus format)
+- **RL Service**: `http://localhost:5002/api/metrics/summary` (Prometheus format)
+
+### Collecting Metrics for Progress Reports
+
+**Quick Method**:
 ```bash
-# Load initial data (run once)
-python scripts/initial_data_load.py
-
-# Verify data pipeline
-python scripts/verify_data_pipeline.py
+python scripts/collect_metrics.py
 ```
+This generates `PROGRESS_REPORT_METRICS.md` with formatted tables.
 
-### Background Jobs
+### Metrics Guide
+See [docs/METRICS_COLLECTION.md](docs/METRICS_COLLECTION.md) for detailed instructions on:
+- Collecting metrics from all services
+- Interpreting metrics values
+- Troubleshooting metrics collection
+- SonarQube integration
 
-The API automatically runs background jobs for:
+### Progress Report Template
+Use [PROGRESS_REPORT_TEMPLATE.md](PROGRESS_REPORT_TEMPLATE.md) as a base for weekly progress reports.
 
-- PDF ingestion: Periodically processes PDF files from the `docs/` directory (configurable via `PDF_INGEST_INTERVAL_HOURS`, default: 24 hours)
+## API Documentation
 
-Check job status: `GET /v1/background/status`
+- [Backend API](docs/api/API_REFERENCE.md)
+- [Chatbot API](docs/api/CHATBOT_API.md)
+- [RL Service API](docs/api/RL_SERVICE_API.md)
 
-### Configuration
+## Documentation Index
 
-Required environment variables:
+For a complete guide to all documentation, see [docs/INDEX.md](docs/INDEX.md).
 
-- `GROQ_API_KEY`: Must be a valid Groq API key from https://console.groq.com/ (starts with `gsk_`)
-- `CHROMA_PERSIST_DIR`: Use absolute path for reliability (code resolves relative paths programmatically)
+## Project Links
 
-Optional environment variables:
+- **Portfolio Website**: [https://iridescent-scone-2e71a9.netlify.app/](https://iridescent-scone-2e71a9.netlify.app/) - View the project showcase, team information, and features
+- **GitHub Repository**: Current repository
 
-- `PDF_INGEST_INTERVAL_HOURS`: Background job interval for PDF ingestion in hours (default: 24)
-- `ENABLE_PDF_INGESTION`: Enable/disable automatic PDF ingestion (default: true)
+## License
 
-See `.env.example` for full configuration options.
-
-For detailed documentation, see [RAG Pipeline Documentation](docs/RAG_PIPELINE.md).
-
-### Data Pipeline Orchestration
-
-Run the complete data pipeline using the orchestrator script:
-
-```powershell
-# Run full pipeline (all phases)
-powershell -ExecutionPolicy Bypass -File deploy-master.ps1
-
-# Skip PDF ingestion
-powershell -ExecutionPolicy Bypass -File deploy-master.ps1 --skip-pdf-ingest
-
-# Full refresh (clear collections and reload)
-powershell -ExecutionPolicy Bypass -File deploy-master.ps1 --full-refresh
-```
-
-The pipeline orchestrator runs these phases:
-1. **PHASE 0**: Environment setup (Python, packages, directories)
-2. **PHASE 1**: PDF ingestion from `docs/` directory
-3. **PHASE 2**: API verification (test endpoints)
-4. **PHASE 3**: Summary and next steps
-
-## 🧪 Testing & Development
-
-### Server Health Check
-
-Before running tests, verify the server is running:
-
-```powershell
-python scripts/check_server.py
-```
-
-This checks:
-- Server is responding at http://127.0.0.1:8000
-- Virtual environment exists
-- Knowledge base is ingested
-- Required packages are installed
-- Environment variables are configured
-
-### Performance Metrics
-
-**⚠️ IMPORTANT: Server Must Be Running Before Testing**
-
-Before running any metrics or tests:
-
-1. **Start the server:**
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File scripts/dev_up.ps1
-   ```
-
-2. **Verify it's running:**
-   ```powershell
-   python scripts/check_server.py
-   ```
-   Wait for: "✅ Server is running at http://127.0.0.1:8000"
-
-3. **Then run tests:**
-   ```powershell
-   python scripts/print_metrics.py
-   ```
-
-**Common Mistake:** Running `print_metrics.py` before starting the server results in 0% success rate in `metrics/runtime_http.json`. Always start the server first!
-
-**Note:** Metrics should be generated dynamically using `scripts/print_metrics.py` rather than viewing static snapshots. Static metric files become outdated and can be misleading.
-
----
-
-Run performance tests (requires server running):
-
-```powershell
-python scripts/print_metrics.py --url http://127.0.0.1:8000 --runs 5
-```
-
-Arguments:
-- `--url`: Base URL of the API server (default: `http://127.0.0.1:8000`)
-- `--runs`: Number of test iterations per endpoint (default: `5`)
-
-> **Note:** If metrics show 0% success rate, the server was not running during the test. Follow the steps above to regenerate valid metrics.
-
-### Basic Endpoint Tests
-
-Run basic endpoint tests (uses port 8000 by default):
-
-```powershell
-python scripts/smoke_local.py
-```
-
-### Run Tests
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=app --cov-report html
-
-# Run specific test file
-pytest tests/test_chat.py
-
-# Run API sanity check
-python scripts/sanity_check.py
-```
-
-### API Sanity Check
-The sanity check script tests all major API endpoints to ensure the system is working correctly:
-
-```bash
-# Run comprehensive API tests
-python scripts/sanity_check.py
-
-# Test against different URL
-python scripts/sanity_check.py --url http://localhost:8000
-```
-
-The sanity check will test:
-- Health check endpoint
-- Game episodes listing
-- Starting a new game
-- Game tick (advance time)
-- Stock trading (buy AAPL)
-- Portfolio retrieval
-- Game summary
-- Search functionality
-- Explain functionality
-- Metrics endpoints
-
-**Example Output:**
-```
-🧪 WealthArena API Sanity Check
-==================================================
-PASS: Health Check - Status: healthy
-PASS: Game Episodes - Found 4 episodes
-PASS: Start Game - Game ID: abc123-def456
-PASS: Game Tick - Advanced to: 2020-02-20
-PASS: Game Trade - Trade ID: trade_789
-PASS: Game Portfolio - Cash: $49,950.00, Holdings: 1
-PASS: Game Summary - Total Value: $50,100.00, P&L: $100.00
-PASS: Search - Found 5 results
-PASS: Explain - Answer length: 245 chars, Sources: 3
-PASS: Metrics Basic - Metrics available: 8 keys
-
-==================================================
-📊 Test Summary: 10/10 tests passed
-✅ All tests passed!
-```
-
-### Code Quality
-```bash
-# Format code
-black .
-
-# Lint code
-ruff check . --fix
-
-# Type checking
-mypy app/
-```
-
-### Export API Documentation
-```bash
-# Export OpenAPI spec
-python scripts/export_openapi.py
-```
-
-## 🤖 Machine Learning Models
-
-### Train Sentiment Analysis Model
-1. Open Jupyter notebook:
-   ```bash
-   jupyter notebook ml/notebooks/02_finetune_sentiment.ipynb
-   ```
-
-2. Run all cells to train the DistilBERT sentiment model
-
-3. The model automatically saves to `models/sentiment-finetuned/`
-
-### Train Intent Classification Model
-1. Open Jupyter notebook:
-   ```bash
-   jupyter notebook ml/notebooks/03_finetune_intent.ipynb
-   ```
-
-2. Run all cells to train the intent classification model
-
-3. Model saves to `models/intent-finetuned/`
-
-### ML Pipeline Scripts
-The ML directory contains additional scripts for data processing and model training:
-
-```bash
-# Export financial phrasebank data
-python ml/scripts/export_finphrasebank.py
-
-# Run complete ML pipeline
-python ml/scripts/pipeline_prepare_and_train.py
-
-# Run pipeline with PowerShell (Windows)
-ml/scripts/run_pipeline.ps1
-```
-
-## 📊 Monitoring & Metrics
-
-### API Performance Metrics
-- **Response Time**: Average API response time (ms)
-- **Error Rate**: Percentage of failed requests
-- **Throughput**: Requests per minute
-- **Uptime**: Service availability percentage
-
-### Machine Learning Metrics
-- **Accuracy**: Model prediction accuracy (%)
-- **F1-Score**: Macro-averaged F1 score
-- **Inference Time**: Model prediction speed (ms)
-- **Training Loss**: Model training convergence
-
-### RSS Scraping Metrics
-- **Success Rate**: Percentage of successful RSS fetches
-- **Pages per Minute**: RSS feed processing throughput
-- **Error Rate**: Failed RSS requests percentage
-- **Response Time**: Average RSS fetch time
-
-## 🏗️ Project Structure
-
-```
-WealthArena/
-├── app/                    # FastAPI application
-│   ├── background/        # Background job scheduler
-│   │   └── scheduler.py   # Periodic PDF ingestion
-│   ├── api/               # API endpoints
-│   │   ├── chat.py        # Chat endpoints
-│   │   ├── chat_stream.py # WebSocket chat streaming
-│   │   ├── game.py        # Game mode endpoints
-│   │   ├── game_stream.py # WebSocket game streaming
-│   │   ├── search.py      # Vector search functionality
-│   │   ├── explain.py     # AI explanation with KB
-│   │   ├── market.py      # Market data endpoints
-│   │   ├── context.py     # Context & knowledge
-│   │   ├── history.py     # Chat history
-│   │   ├── feedback.py    # User feedback
-│   │   ├── export.py      # Data export
-│   │   ├── metrics.py     # System metrics
-│   │   └── background.py # Background job status
-│   ├── llm/               # LLM client integration
-│   │   ├── client.py      # Groq LLM client
-│   │   └── guard_prompt.txt # Educational guardrails
-│   ├── models/            # ML model wrappers
-│   │   └── sentiment.py  # Sentiment analysis
-│   ├── tools/             # Utility tools
-│   │   ├── prices.py      # Price data tools
-│   │   ├── document_processor.py # Document chunking
-│   │   ├── pdf_processor.py # PDF processing
-│   │   ├── vector_ingest.py    # Vector store ingestion
-│   │   └── retrieval.py   # KB vector search
-│   ├── metrics/           # Prometheus metrics
-│   ├── middleware/        # FastAPI middleware
-│   └── main.py           # Application entry point
-├── docs/                 # Documentation
-│   ├── kb/               # Knowledge Base (NEW)
-│   │   ├── intro.md      # Platform introduction
-│   │   ├── indicators_rsi.md # RSI guide
-│   │   └── risk_management.md # Risk management
-│   ├── CHAT_HISTORY_API.md
-│   ├── CHAT_STREAMING.md
-│   ├── CONTEXT_KNOWLEDGE_API.md
-│   ├── INTEGRATION_ANDROID.md
-│   ├── INTEGRATION_IOS.md
-│   └── INTEGRATION_RN.md
-├── packages/             # Mobile SDKs
-│   ├── mobile-sdk-android/ # Android SDK
-│   ├── mobile-sdk-ios/    # iOS SDK
-│   ├── mobile-sdk-rn/     # React Native SDK
-│   └── wealtharena-rn/    # RN Components
-├── examples/              # Demo applications
-│   ├── android-demo/      # Android demo
-│   ├── ios-demo/          # iOS demo
-│   └── rn-demo/           # React Native demo
-├── ml/                    # Machine Learning
-│   ├── notebooks/         # Jupyter notebooks
-│   │   ├── 01_prepare_data.ipynb
-│   │   ├── 02_finetune_sentiment.ipynb
-│   │   └── 03_finetune_intent.ipynb
-│   └── scripts/           # ML pipeline scripts
-├── scripts/               # Development scripts
-│   ├── dev_up.ps1         # Windows one-command setup
-│   ├── dev_up.sh          # Unix one-command setup
-│   ├── kb_ingest.py       # Knowledge Base ingestion
-│   ├── initial_data_load.py    # One-time data loading
-│   ├── verify_data_pipeline.py # Pre-deployment checks
-│   ├── run_pipeline.py         # Data pipeline orchestrator
-│   ├── smoke_local.py     # API testing
-│   └── export_openapi.py  # API documentation
-├── tests/                 # Test files
-├── data/                  # Runtime data (gitignored)
-│   ├── chat_history.db    # SQLite chat history
-│   ├── vectorstore/       # ChromaDB vector store
-│   └── game_state/        # Game state storage
-├── models/                # Trained ML models (gitignored)
-├── requirements.txt       # Dependencies
-└── .env.example          # Environment template
-```
-
-## 🔧 Configuration
-
-### Environment Variables
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `GROQ_API_KEY` | Groq API key for LLM (REQUIRED - application will not function without it) | Required |
-| `GROQ_MODEL` | Groq model to use | `llama3-8b-8192` |
-| `LLM_PROVIDER` | LLM provider | `groq` |
-| `SENTIMENT_MODEL_DIR` | Path to sentiment model | `models/sentiment-finetuned` |
-| `SENTRY_DSN` | Sentry DSN for error tracking | Optional |
-| `CHROMA_PERSIST_DIR` | Vector database directory (use absolute path) | `data/vectorstore` (resolved to absolute) |
-| `PDF_INGEST_INTERVAL_HOURS` | Background job interval for PDF ingestion | `24` |
-| `ENABLE_PDF_INGESTION` | Enable/disable automatic PDF ingestion | `true` |
-| `ENABLE_TOOLS` | Enable/disable non-LLM features (sentiment analysis, price queries) | `false` |
-| `ENABLE_SENTIMENT_ANALYSIS` | Enable/disable sentiment analysis (requires ENABLE_TOOLS=true) | `false` |
-| `APP_HOST` | Server host | `0.0.0.0` |
-| `APP_PORT` | Server port | `8000` |
-
-## 🚨 Troubleshooting
-
-For detailed troubleshooting steps, see the [Troubleshooting Guide](docs/TROUBLESHOOTING.md).
-
-### Data Pipeline Issues
-
-- **No documents in vector store**: Run `python scripts/kb_ingest.py` to ingest knowledge base, and `python scripts/pdf_ingest.py` to ingest PDF documents
-- **PDF ingestion not running**: Check `/v1/background/status` and logs. Verify `ENABLE_PDF_INGESTION=true` in `.env`
-- **PDF ingestion slow**: Use parallel processing with `python scripts/pdf_ingest.py --parallel --max-workers 2`
-
-### Quick Diagnostics
-
-```powershell
-# Check server health and prerequisites
-python scripts/check_server.py
-
-# Check if API is running
-curl http://localhost:8000/healthz
-
-# Check metrics
-curl http://localhost:8000/metrics
-```
-
-### Common Issues
-
-1. **GROQ_API_KEY not set or invalid**: 
-   - Error: "GROQ_API_KEY is required" or "LLM service unavailable"
-   - Solution: Ensure `.env` file exists with a valid `GROQ_API_KEY` starting with `gsk_`
-   - Get your key from: https://console.groq.com/
-   - Verify the key is correctly formatted (no extra spaces, correct prefix)
-   - Restart the server after adding/updating the API key
-
-2. **Server not running**: Run `powershell -ExecutionPolicy Bypass -File scripts/dev_up.ps1` first
-3. **Port 8000 busy**: See [TROUBLESHOOTING.md Section 3](docs/TROUBLESHOOTING.md#section-3-port-conflicts)
-4. **Import Errors**: See [TROUBLESHOOTING.md Section 4](docs/TROUBLESHOOTING.md#section-4-dependency-issues)
-5. **Vector store issues**: See [TROUBLESHOOTING.md Section 5](docs/TROUBLESHOOTING.md#section-5-chromadb--vector-store-issues)
-6. **Testing issues**: See [TROUBLESHOOTING.md Section 6](docs/TROUBLESHOOTING.md#section-6-testing-issues)
-
-## 📚 Additional Resources
-
-- **API Documentation**: Visit `http://localhost:8000/docs` when server is running
-- **OpenAPI Specification**: Run `python scripts/export_openapi.py` to generate `docs/openapi.json`
-- **Jupyter Notebooks**: Detailed ML training examples in `notebooks/`
-- **Model Metrics**: Check `metrics_*.json` files for training results
-- **Docker Documentation**: See `Dockerfile` and `docker-compose.yml` for container setup
-
-## 🚀 Deployment
-
-For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
-
-### Quick Deploy Options
-
-#### Docker (Recommended for Local/Production)
-
-**Using docker-compose:**
-```bash
-docker-compose up -d
-```
-
-**Using master deployment script:**
-```powershell
-# Windows PowerShell
-.\deploy-master.ps1 --deploy docker
-
-# Or with options
-.\deploy-master.ps1 --deploy docker -Build -Run
-.\deploy-master.ps1 --deploy docker -Stop
-.\deploy-master.ps1 --deploy docker -Logs
-```
-
-**Manual Docker commands:**
-```bash
-# Build image
-docker build -t wealtharena-api .
-
-# Run container
-docker run -d --name wealtharena-api -p 8000:8000 --env-file .env wealtharena-api
-```
-
-#### Azure App Service
-
-**Automated deployment:**
-```powershell
-.\deploy-master.ps1 --deploy azure `
-  -ResourceGroup "rg-wealtharena" `
-  -AppName "wealtharena-api" `
-  -Location "eastus"
-```
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for full deployment guide including Azure, Docker, and production configuration.
-
----
-
-**Happy Trading! 📈🤖**
-
-## Verified Metrics (local)
-
-| Endpoint | Success % | Avg (ms) | P50 | P90 | P95 | P99 |
-|----------|-----------|----------|-----|-----|-----|-----|
-| episodes | 0.0% | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| healthz | 0.0% | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-| explain | 0.0% | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
-
-*Overall: 0.0% success, 0.0ms avg latency*
-*Last verified: 2025-11-06T12:47:27.485701*
-
-## Verified Metrics (latest run)
-
-| Component | Metric | Value |
-|-----------|--------|-------|
-| Chatbot | Inference(ms) avg | 1931.4 |
-| Chatbot | ROUGE-L | n/a |
-| Chatbot | BERT-F1 | n/a |
-| Retrieval | Latency(ms) avg | 550.7 |
-| Retrieval | MAP@5 | n/a |
-| Retrieval | MRR@5 | n/a |
-| Classification | Inference(ms) avg | n/a |
-| Classification | F1-macro | n/a |
-| Classification | AUC | n/a |
-| Overall | Success Rate % | 90.0 |
-| Overall | P50(ms) | 1312.0 |
-| Overall | P95(ms) | 3329.0 |
-
+MIT
