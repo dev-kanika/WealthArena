@@ -6,7 +6,7 @@ WealthArena is a multi-agent investing insights platform combining reinforcement
 
 Click to watch the full demo video of **WealthArena – Learn Trading the Fun Way**:
 
-[![Watch the Demo](https://youtube.com/shorts/eOe_1JZbYZI)
+[[Watch the Demo](https://youtube.com/shorts/eOe_1JZbYZI)
 
 > This walkthrough showcases the WealthArena mobile app—featuring user onboarding, authentication, and interactive modules designed to gamify financial trading education.
 
