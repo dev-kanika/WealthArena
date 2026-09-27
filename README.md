@@ -4,7 +4,7 @@ WealthArena is a multi-agent investing insights platform combining reinforcement
 
 
 <p align="center">
-  <img src="archive/ARCHIVE/wealtharena-banner.png" alt="WealthArena - AI-Powered Investing Platform" width="100%">
+  <img src="archive/ARCHIVE/wealth-arena-banner.png" alt="WealthArena - AI-Powered Investing Platform" width="100%">
 </p>
 
 
