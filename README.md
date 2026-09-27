@@ -2,6 +2,12 @@
 
 WealthArena is a multi-agent investing insights platform combining reinforcement learning, real-time market analytics, and gamified education.
 
+
+<p align="center">
+  <img src="archive/ARCHIVE/wealtharena-banner.png" alt="WealthArena - AI-Powered Investing Platform" width="100%">
+</p>
+
+
 ## 📽️ Demo
 
 Click to watch the full demo video of **WealthArena – Learn Trading the Fun Way**:
